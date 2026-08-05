@@ -56,9 +56,9 @@ export function UserSessionsSection() {
       return createUserSession(baseUrl, repository.projectRepositoryId);
     },
     onSuccess: session => {
-      // Seed what the thread page reads on mount — this response already
-      // carries it, so it renders the session instead of a spinner.
-      queryClient.setQueryData(queryKeys.userSession(session.sessionId), session);
+      // Seed what the thread page reads on mount — the response carries it, so
+      // the page renders the session instead of a spinner.
+      queryClient.setQueryData<FactoryUserSession>(queryKeys.userSession(session.sessionId), session);
       addCachedSession(queryClient, repository?.projectRepositoryId, session);
       queryClient.setQueryData(
         queryKeys.agentControllerThreadMessages(
