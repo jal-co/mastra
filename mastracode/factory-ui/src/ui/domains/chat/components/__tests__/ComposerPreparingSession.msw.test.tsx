@@ -40,6 +40,8 @@ interface PreparingSession {
 interface StubPreparingSessionOptions {
   /** Makes every message dispatch fail, as an offline sandbox would. */
   failDispatch?: boolean;
+  /** A session whose sandbox went back to the pool: online again, not provisioned again. */
+  materialized?: boolean;
 }
 
 /** The controller sends `{ message }`; anything else means the wire shape moved. */
@@ -50,10 +52,13 @@ function readSentMessage(body: unknown): string {
 }
 
 /**
- * Network boundary for a user session whose workspace was never materialized:
- * everything answers except the session create, which hangs until released.
+ * Network boundary for a session that is not online yet: everything answers
+ * except the session create, which hangs until released.
  */
-function stubPreparingSession({ failDispatch = false }: StubPreparingSessionOptions = {}): PreparingSession {
+function stubPreparingSession({
+  failDispatch = false,
+  materialized = false,
+}: StubPreparingSessionOptions = {}): PreparingSession {
   let release = () => {};
   const workspaceReady = new Promise<void>(resolve => {
     release = resolve;
@@ -98,7 +103,7 @@ function stubPreparingSession({ failDispatch = false }: StubPreparingSessionOpti
           baseBranch: 'main',
           sandboxId: null,
           sandboxWorkdir: null,
-          materializedAt: null,
+          materializedAt: materialized ? '2026-07-23T00:00:00.000Z' : null,
           createdAt: '2026-07-23T00:00:00.000Z',
           updatedAt: '2026-07-23T00:00:00.000Z',
         },
@@ -255,6 +260,25 @@ describe('Composer while a session prepares its workspace', () => {
 
     await waitFor(() => expect(session.sentMessages).toEqual(['fix the login bug', 'and add a test']));
     expect(session.steerAttempts).toBe(0);
+  });
+
+  it('says connecting, not preparing, for a session whose workspace already exists', async () => {
+    const session = stubPreparingSession({ materialized: true });
+    const user = userEvent.setup();
+
+    renderThread();
+
+    const message = () => screen.getByRole('textbox', { name: 'Message' });
+    await waitFor(() => expect(message()).toBeEnabled());
+    await waitFor(() => expect(screen.getByText('Connecting…')).toBeInTheDocument());
+    expect(screen.queryByText('Preparing workspace…')).not.toBeInTheDocument();
+
+    await user.type(message(), 'fix the login bug');
+    await user.keyboard('{Enter}');
+
+    session.finishWorkspace();
+
+    await waitFor(() => expect(session.sentMessages).toEqual(['fix the login bug']));
   });
 
   it('reports a failed dispatch once, not once per reporter', async () => {

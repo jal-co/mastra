@@ -28,6 +28,7 @@ import {
   useSteerAgentControllerMutation,
 } from '../../../../hooks/useAgentControllerRunMutations';
 import { useCreateAgentControllerThreadMutation } from '../../../../hooks/useAgentControllerThreadMutations';
+import { usePreparingThreadId } from '../hooks/usePreparingThreadId';
 import { matchCommands } from '../services/commands';
 import { AGENT_CONTROLLER_ID } from '../services/constants';
 import { ThreadPageKickoffTimeoutError, queueThreadPageKickoff } from '../services/threadPageReadiness';
@@ -84,7 +85,7 @@ function readFileAsBase64(file: File): Promise<string> {
 
 export function Composer({ variant = 'inline' }: ComposerProps) {
   const { kind, resourceId, sessionEnabled, projectPath, baseUrl } = useChatSessionContext();
-  const { factoryId, threadId: routeThreadId } = useParams<{ factoryId: string; threadId: string }>();
+  const { factoryId } = useParams<{ factoryId: string }>();
   const onDraftComposer = useMatch('/factories/:factoryId/new') !== null;
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -106,10 +107,10 @@ export function Composer({ variant = 'inline' }: ComposerProps) {
   const steerMutation = useSteerAgentControllerMutation(hookArgs);
   const abortMutation = useAbortAgentControllerMutation(hookArgs);
 
-  // Opening a session waits on its workspace being prepared. Rather than sit
-  // behind a dead composer, take the first message now and let the thread page
-  // dispatch it once the session is online.
-  const queueing = !onDraftComposer && Boolean(routeThreadId) && sessionEnabled && status === 'connecting';
+  // Opening a session waits on a sandbox. Rather than sit behind a dead
+  // composer, take the message now and let the thread page dispatch it once the
+  // session is online.
+  const preparingThreadId = usePreparingThreadId();
 
   const [images, setImages] = useState<PendingImage[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -157,7 +158,7 @@ export function Composer({ variant = 'inline' }: ComposerProps) {
   const addImageFiles = async (fileList: Iterable<File>) => {
     // A queued kickoff carries text only, and drop/paste bypass the disabled
     // attach button — refuse here rather than send an unattachable message.
-    if (queueing) {
+    if (preparingThreadId) {
       pushNotice('Images can be attached once the session is ready.');
       return;
     }
@@ -217,10 +218,11 @@ export function Composer({ variant = 'inline' }: ComposerProps) {
       timeoutMs: PREPARING_SESSION_TIMEOUT_MS,
     }).catch(error => {
       // The thread page announces its own dispatch failures; only the wait
-      // expiring unclaimed has no other voice.
+      // expiring unclaimed has no other voice. Its message names a thread id
+      // and a kickoff, which is for a log, not for whoever waited.
       if (!(error instanceof ThreadPageKickoffTimeoutError)) return;
       clearPending();
-      pushNotice(error.message, 'error');
+      pushNotice('The session never came online. Send the message again once it is ready.', 'error');
     });
   };
 
@@ -315,7 +317,7 @@ export function Composer({ variant = 'inline' }: ComposerProps) {
     // Ahead of the steer branch: the first queued message marks the transcript
     // busy, which would route every later one into a steer the offline session
     // cannot take.
-    if (queueing && routeThreadId) {
+    if (preparingThreadId) {
       // Only a message can wait for the session; commands act on it live.
       if (text.startsWith('/')) {
         updateDraft(text);
@@ -327,7 +329,7 @@ export function Composer({ variant = 'inline' }: ComposerProps) {
         pushNotice('Remove the attached images to send while the session is preparing.');
         return;
       }
-      queueUntilSessionReady(routeThreadId, text);
+      queueUntilSessionReady(preparingThreadId, text);
       return;
     }
     if (await runComposerCommand(text)) return;
@@ -348,7 +350,7 @@ export function Composer({ variant = 'inline' }: ComposerProps) {
   }
 
   const attachDisabled = status !== 'ready';
-  const disabled = attachDisabled && !queueing;
+  const disabled = attachDisabled && !preparingThreadId;
 
   return (
     <ComposerRoot onSubmit={onSubmit} onDrop={onDrop} onDragOver={e => e.preventDefault()} className="relative">
