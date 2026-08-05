@@ -10,8 +10,7 @@ describe('allocateUserSessionBranch', () => {
     sourceControl = new SourceControlStorageInMemory();
   });
 
-  const allocate = () =>
-    allocateUserSessionBranch({ sourceControl, projectRepositoryId: 'ghp-1', userId: 'user-1' });
+  const allocate = () => allocateUserSessionBranch({ sourceControl, projectRepositoryId: 'ghp-1', userId: 'user-1' });
 
   const createSession = (branch: string) =>
     sourceControl.sessions.create({
@@ -53,12 +52,18 @@ describe('allocateUserSessionBranch', () => {
     expect(await allocate()).toBe('user/session-1');
   });
 
+  it('ignores an index the counter column could not hold', async () => {
+    await createSession('user/session-3000000000');
+
+    expect(await allocate()).toBe('user/session-1');
+  });
+
   it('names each user their own sessions', async () => {
     await createSession('user/session-1');
     await allocate();
 
-    expect(
-      await allocateUserSessionBranch({ sourceControl, projectRepositoryId: 'ghp-1', userId: 'user-2' }),
-    ).toBe('user/session-1');
+    expect(await allocateUserSessionBranch({ sourceControl, projectRepositoryId: 'ghp-1', userId: 'user-2' })).toBe(
+      'user/session-1',
+    );
   });
 });

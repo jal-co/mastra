@@ -412,10 +412,10 @@ describe('SourceControlStorage', () => {
 
     expect(await allocate(1)).toBe(1);
     expect(await allocate(2)).toBe(2);
-    // The caller deleted session-2, so its branch is the highest one live —
-    // reusing 2 would put the next session back on the deleted one's branch.
+    // Floor back at 1 because session-2 was deleted — its branch is still out
+    // there, so 2 must not come back.
     expect(await allocate(1)).toBe(3);
-    // A session named outside the counter (an explicit branch) pushes it past.
+    // A branch named outside the counter pushes it past.
     expect(await allocate(9)).toBe(9);
     expect(await allocate(1)).toBe(10);
   });
@@ -428,19 +428,13 @@ describe('SourceControlStorage', () => {
       repositoryExternalId: 'repository-99',
       repositorySlug: 'mastra-ai/other',
     });
+    const allocate = (projectRepositoryId: string, userId: string) =>
+      github.userSessionNames.allocate({ projectRepositoryId, userId, atLeast: 1 });
 
-    expect(await github.userSessionNames.allocate({ projectRepositoryId: link.id, userId: 'user-1', atLeast: 1 })).toBe(
-      1,
-    );
-    expect(await github.userSessionNames.allocate({ projectRepositoryId: link.id, userId: 'user-2', atLeast: 1 })).toBe(
-      1,
-    );
-    expect(
-      await github.userSessionNames.allocate({ projectRepositoryId: otherLink.id, userId: 'user-1', atLeast: 1 }),
-    ).toBe(1);
-    expect(await github.userSessionNames.allocate({ projectRepositoryId: link.id, userId: 'user-1', atLeast: 1 })).toBe(
-      2,
-    );
+    expect(await allocate(link.id, 'user-1')).toBe(1);
+    expect(await allocate(link.id, 'user-2')).toBe(1);
+    expect(await allocate(otherLink.id, 'user-1')).toBe(1);
+    expect(await allocate(link.id, 'user-1')).toBe(2);
   });
 
   it('clears every owned source-control collection', async () => {

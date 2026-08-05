@@ -492,10 +492,9 @@ export interface SourceControlStorageHandle {
   };
   readonly userSessionNames: {
     /**
-     * Hand out an index for a generated session name: above every index handed
-     * out before for this link and user, and at least `atLeast`. Deleting a
-     * session drops its row but not the branch it pushed, so an index that
-     * came back around would put the next session on that branch.
+     * Index above every one handed out before for this link and user, and at
+     * least `atLeast`. Never reused: a deleted session's branch outlives its
+     * row, and the next session would land on it.
      */
     allocate(args: { projectRepositoryId: string; userId: string; atLeast: number }): Promise<number>;
   };

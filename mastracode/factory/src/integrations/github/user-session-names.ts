@@ -2,7 +2,10 @@ import type { SourceControlStorageHandle } from '../../storage/domains/source-co
 
 export const USER_SESSION_BRANCH_PREFIX = 'user/';
 
-const GENERATED_NAME = /^session-(\d+)$/;
+// Digits bounded to what the counter column holds: an explicit branch may claim
+// any name, and a wider floor than an INTEGER takes would fail every allocation
+// after it.
+const GENERATED_NAME = /^session-(\d{1,9})$/;
 
 function generatedIndex(branch: string): number {
   if (!branch.startsWith(USER_SESSION_BRANCH_PREFIX)) return 0;
@@ -11,10 +14,9 @@ function generatedIndex(branch: string): number {
 }
 
 /**
- * Branch for a user session the caller did not name. The index counts up
- * forever and clears every live session, so no two sessions ever share a
- * branch — including across a delete, which drops the session row but leaves
- * the branch it pushed behind.
+ * Branch for a user session the caller did not name. The index only counts up:
+ * a deleted session's branch outlives its row, and reusing the index would put
+ * the next session back on it.
  */
 export async function allocateUserSessionBranch(args: {
   sourceControl: Pick<SourceControlStorageHandle, 'sessions' | 'userSessionNames'>;
