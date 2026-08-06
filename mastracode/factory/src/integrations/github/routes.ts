@@ -194,6 +194,10 @@ function isValidGitRef(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= 255 && /^[A-Za-z0-9_./-]+$/.test(value);
 }
 
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 /**
  * Resolve the org-scoped tenant for a GitHub request. GitHub project features
  * are org-owned, so they require both a signed-in user and a WorkOS
@@ -1312,28 +1316,31 @@ function buildProjectGitRoutes({
           ? await resolveProjectRepository({ github, orgId, projectRepositoryId })
           : null;
         if (!project) return c.json({ error: 'Project repository not found' }, 404);
-        let body: { branch?: unknown; baseBranch?: unknown };
+        let body: unknown;
         try {
           body = await c.req.json();
         } catch {
           return c.json({ error: 'Invalid JSON body' }, 400);
         }
+        if (!isJsonObject(body)) return c.json({ error: 'Invalid JSON body' }, 400);
+        const baseBranch = body.baseBranch === undefined ? project.defaultBranch : body.baseBranch;
+        if (!isValidGitRefSandbox(baseBranch)) return c.json({ error: 'Invalid baseBranch' }, 400);
+        const sessionId = randomUUID();
         let branch: string;
         if (body.branch === undefined) {
           branch = await allocateUserSessionBranch({
             sourceControl: github.sourceControlStorage,
             projectRepositoryId: project.id,
             userId,
+            sessionId,
           });
         } else if (isValidGitRefSandbox(body.branch)) {
           branch = body.branch;
         } else {
           return c.json({ error: 'Invalid branch' }, 400);
         }
-        const baseBranch = body.baseBranch === undefined ? project.defaultBranch : body.baseBranch;
-        if (!isValidGitRefSandbox(baseBranch)) return c.json({ error: 'Invalid baseBranch' }, 400);
         const session = await github.sourceControlStorage.sessions.create({
-          sessionId: randomUUID(),
+          sessionId,
           projectRepositoryId: project.id,
           orgId,
           userId,

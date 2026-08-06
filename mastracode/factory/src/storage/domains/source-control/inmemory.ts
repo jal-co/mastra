@@ -21,6 +21,7 @@ import type {
   UpsertSourceControlRepositoryInput,
   UpsertSourceControlWorktreeInput,
 } from './base.js';
+import { nextUserSessionNameIndex } from './user-session-name-index.js';
 
 /** In-memory provider-scoped source-control handle for route tests. */
 export class SourceControlStorageInMemory implements SourceControlStorageHandle {
@@ -526,9 +527,12 @@ export class SourceControlStorageInMemory implements SourceControlStorageHandle 
       userId: string;
       atLeast: number;
     }): Promise<number> => {
-      const key = `${projectRepositoryId} ${userId}`;
+      const projectRepository = this.projectRepositoriesRows.find(row => row.id === projectRepositoryId);
+      const repository = this.repositoriesRows.find(row => row.id === projectRepository?.repositoryId);
+      if (!repository) throw new Error('Source-control repository not found.');
+      const key = JSON.stringify([this.integrationId, repository.externalId, userId]);
       const last = this.userSessionNameRows.get(key);
-      const next = last === undefined ? atLeast : Math.max(last + 1, atLeast);
+      const next = nextUserSessionNameIndex(last, atLeast);
       this.userSessionNameRows.set(key, next);
       return next;
     },

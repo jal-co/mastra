@@ -652,6 +652,7 @@ beforeEach(() => {
   sourceControlStorage.worktreesRows = tables.worktrees as any;
   sourceControlStorage.sessionsRows = tables.sessions as any;
   sourceControlStorage.sandboxPoolRows = [];
+  sourceControlStorage.userSessionNameRows.clear();
   featureEnabled = true;
   sandboxEnabled = true;
   cookieUser = null;
@@ -1780,15 +1781,66 @@ describe('Factory session routes', () => {
 
     const first = await postJson(app, '/web/github/projects/p1/sessions', {});
     const second = await postJson(app, '/web/github/projects/p1/sessions', {});
+    const firstSession = (await first.json()).session;
+    const secondSession = (await second.json()).session;
 
-    expect((await first.json()).session.branch).toBe('user/session-1');
-    expect((await second.json()).session.branch).toBe('user/session-2');
+    expect(firstSession.branch).toBe(`user/session-1-${firstSession.sessionId}`);
+    expect(secondSession.branch).toBe(`user/session-2-${secondSession.sessionId}`);
     expect(tables.sessions).toHaveLength(2);
   });
 
   it('rejects an invalid branch instead of naming one', async () => {
     seedMaterializedProject();
     const res = await postJson(buildApp({ workosId: 'u1' }), '/web/github/projects/p1/sessions', { branch: 42 });
+    expect(res.status).toBe(400);
+    expect(tables.sessions).toHaveLength(0);
+  });
+
+  it('gives users on the same repository distinct generated branches', async () => {
+    seedMaterializedProject();
+    const first = await postJson(buildApp({ workosId: 'u1' }), '/web/github/projects/p1/sessions', {});
+    const second = await postJson(buildApp({ workosId: 'u2' }), '/web/github/projects/p1/sessions', {});
+    const firstSession = (await first.json()).session;
+    const secondSession = (await second.json()).session;
+
+    expect(firstSession.branch).toBe(`user/session-1-${firstSession.sessionId}`);
+    expect(secondSession.branch).toBe(`user/session-1-${secondSession.sessionId}`);
+    expect(firstSession.branch).not.toBe(secondSession.branch);
+  });
+
+  it('keeps concurrent explicit and generated branch creation distinct', async () => {
+    seedMaterializedProject();
+    const app = buildApp({ workosId: 'u1' });
+    const [explicit, generated] = await Promise.all([
+      postJson(app, '/web/github/projects/p1/sessions', { branch: 'user/session-1' }),
+      postJson(app, '/web/github/projects/p1/sessions', {}),
+    ]);
+    const explicitSession = (await explicit.json()).session;
+    const generatedSession = (await generated.json()).session;
+
+    expect(explicitSession.branch).toBe('user/session-1');
+    expect(generatedSession.branch).toBe(`user/session-1-${generatedSession.sessionId}`);
+    expect(generatedSession.branch.endsWith(`-${generatedSession.sessionId}`)).toBe(true);
+    expect(explicitSession.sessionId).not.toBe(generatedSession.sessionId);
+    expect(tables.sessions).toHaveLength(2);
+  });
+
+  it('does not let an explicit generated-style branch skip the counter', async () => {
+    seedMaterializedProject();
+    const app = buildApp({ workosId: 'u1' });
+    const explicit = await postJson(app, '/web/github/projects/p1/sessions', {
+      branch: 'user/session-999999998',
+    });
+    expect(explicit.status).toBe(200);
+
+    const generated = await postJson(app, '/web/github/projects/p1/sessions', {});
+    const generatedSession = (await generated.json()).session;
+    expect(generatedSession.branch).toBe(`user/session-1-${generatedSession.sessionId}`);
+  });
+
+  it('rejects a non-object body instead of treating it as an unnamed session', async () => {
+    seedMaterializedProject();
+    const res = await postJson(buildApp({ workosId: 'u1' }), '/web/github/projects/p1/sessions', 42);
     expect(res.status).toBe(400);
     expect(tables.sessions).toHaveLength(0);
   });

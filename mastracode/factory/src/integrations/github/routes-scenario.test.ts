@@ -400,6 +400,7 @@ beforeEach(() => {
   sourceControlStorage.sandboxesRows = tables.sandboxes as any;
   sourceControlStorage.worktreesRows = tables.worktrees as any;
   sourceControlStorage.sessionsRows = tables.sessions as any;
+  sourceControlStorage.userSessionNameRows.clear();
   featureEnabled = true;
   sandboxEnabled = true;
   mintCount = 0;

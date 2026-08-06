@@ -1,6 +1,8 @@
 import { FactoryStorageDomain, UniqueViolationError } from '@mastra/core/storage';
 import type { CollectionSchema, FactoryStorageOps } from '@mastra/core/storage';
 
+import { nextUserSessionNameIndex } from './user-session-name-index.js';
+
 const FACTORY_PROJECTS = 'factory_projects';
 const INSTALLATIONS = 'source_control_installations';
 const REPOSITORIES = 'source_control_repositories';
@@ -196,15 +198,16 @@ export const SOURCE_CONTROL_SCHEMAS: CollectionSchema[] = [
     name: USER_SESSION_NAMES,
     columns: {
       id: { type: 'uuid-pk' },
-      project_repository_id: { type: 'text' },
+      integration_id: { type: 'text' },
+      repository_external_id: { type: 'text' },
       user_id: { type: 'text' },
       last_index: { type: 'integer' },
       updated_at: { type: 'timestamp' },
     },
     uniqueIndexes: [
       {
-        name: 'source_control_user_session_names_repository_user_unique',
-        columns: ['project_repository_id', 'user_id'],
+        name: 'source_control_user_session_names_provider_repository_user_unique',
+        columns: ['integration_id', 'repository_external_id', 'user_id'],
       },
     ],
   },
@@ -491,11 +494,7 @@ export interface SourceControlStorageHandle {
     delete(id: string): Promise<void>;
   };
   readonly userSessionNames: {
-    /**
-     * Index above every one handed out before for this link and user, and at
-     * least `atLeast`. Never reused: a deleted session's branch outlives its
-     * row, and the next session would land on it.
-     */
+    /** Monotonic index for this provider repository and user. */
     allocate(args: { projectRepositoryId: string; userId: string; atLeast: number }): Promise<number>;
   };
 }
@@ -577,7 +576,8 @@ interface WorktreeDbRow extends Record<string, unknown> {
 
 interface UserSessionNameDbRow extends Record<string, unknown> {
   id: string;
-  project_repository_id: string;
+  integration_id: string;
+  repository_external_id: string;
   user_id: string;
   last_index: number;
   updated_at: Date;
@@ -798,6 +798,19 @@ export class SourceControlStorage extends FactoryStorageDomain {
       const projectRepository = await getProjectRepositoryById(id);
       if (!projectRepository) throw new Error('Project repository not found for this integration.');
       return projectRepository;
+    };
+
+    const userSessionNameWhere = async (projectRepositoryId: string, userId: string) => {
+      const projectRepository = await requireProjectRepositoryById(projectRepositoryId);
+      const repository = await db().findOne<RepositoryDbRow>(REPOSITORIES, {
+        id: projectRepository.repositoryId,
+      });
+      if (!repository) throw new Error('Source-control repository not found.');
+      return {
+        integration_id: integrationId,
+        repository_external_id: repository.external_id,
+        user_id: userId,
+      };
     };
 
     const getSandbox = async (id: string): Promise<ProjectRepositorySandbox | null> => {
@@ -1286,11 +1299,10 @@ export class SourceControlStorage extends FactoryStorageDomain {
       },
       userSessionNames: {
         allocate: async ({ projectRepositoryId, userId, atLeast }) => {
-          await requireProjectRepositoryById(projectRepositoryId);
-          const where = { project_repository_id: projectRepositoryId, user_id: userId };
+          const where = await userSessionNameWhere(projectRepositoryId, userId);
           const bump = () =>
             db().updateAtomic<UserSessionNameDbRow>(USER_SESSION_NAMES, where, row => ({
-              last_index: Math.max(row.last_index + 1, atLeast),
+              last_index: nextUserSessionNameIndex(row.last_index, atLeast),
               updated_at: new Date(),
             }));
           const bumped = await bump();
@@ -1298,13 +1310,12 @@ export class SourceControlStorage extends FactoryStorageDomain {
           try {
             const row = await db().insertOne<UserSessionNameDbRow>(USER_SESSION_NAMES, {
               ...where,
-              last_index: atLeast,
+              last_index: nextUserSessionNameIndex(undefined, atLeast),
               updated_at: new Date(),
             });
             return row.last_index;
           } catch (error) {
             if (!(error instanceof UniqueViolationError)) throw error;
-            // Lost the first-write race — the winner's counter is authoritative.
             const raced = await bump();
             if (!raced) throw error;
             return raced.last_index;

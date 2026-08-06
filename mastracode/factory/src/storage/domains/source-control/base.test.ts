@@ -418,9 +418,11 @@ describe('SourceControlStorage', () => {
     // A branch named outside the counter pushes it past.
     expect(await allocate(9)).toBe(9);
     expect(await allocate(1)).toBe(10);
+    expect(await allocate(999_999_999)).toBe(999_999_999);
+    await expect(allocate(1)).rejects.toThrow(/index space exhausted/);
   });
 
-  it('counts user-session names per repository link and user', async () => {
+  it('counts user-session names per provider repository and user', async () => {
     const project = await createProject();
     const link = await linkRepository({ factoryProjectId: project.id });
     const otherLink = await linkRepository({
@@ -435,6 +437,28 @@ describe('SourceControlStorage', () => {
     expect(await allocate(link.id, 'user-2')).toBe(1);
     expect(await allocate(otherLink.id, 'user-1')).toBe(1);
     expect(await allocate(link.id, 'user-1')).toBe(2);
+  });
+
+  it('continues a user-session counter across links to the same provider repository', async () => {
+    const firstProject = await createProject({ name: 'First project' });
+    const secondProject = await createProject({ name: 'Second project' });
+    const firstLink = await linkRepository({ factoryProjectId: firstProject.id });
+    const secondLink = await linkRepository({ factoryProjectId: secondProject.id });
+
+    expect(
+      await github.userSessionNames.allocate({
+        projectRepositoryId: firstLink.id,
+        userId: 'user-1',
+        atLeast: 1,
+      }),
+    ).toBe(1);
+    expect(
+      await github.userSessionNames.allocate({
+        projectRepositoryId: secondLink.id,
+        userId: 'user-1',
+        atLeast: 1,
+      }),
+    ).toBe(2);
   });
 
   it('clears every owned source-control collection', async () => {

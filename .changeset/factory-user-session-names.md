@@ -2,11 +2,11 @@
 '@mastra/factory': minor
 ---
 
-Added server-side naming for user sessions, so a name is never handed out twice.
+Added automatic branch names for user sessions created without a branch.
 
-Deleting a user session drops its row and its checkout, but not the branch it pushed. A client that names the next session from the sessions still in its list therefore reuses a name that is already spent — and because session creation is idempotent per `(repository, user, branch)`, the new session lands back on the deleted one's work rather than starting clean.
+Omitting `branch` now gives each session a `user/session-N-<session-id>` branch. The counter advances across deleted sessions and repository relinks. The session ID keeps every generated branch unique, so a new session cannot reopen work from a deleted one.
 
-`POST /web/github/projects/:id/sessions` now accepts a request with no `branch` and allocates one from a counter that only ever counts up:
+`POST /web/github/projects/:id/sessions` now accepts a request with no `branch`:
 
 ```ts
 // before — the caller picked the name, with no way to see which ones were spent
