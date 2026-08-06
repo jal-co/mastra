@@ -29,7 +29,7 @@ import {
 } from '../../../../hooks/useAgentControllerRunMutations';
 import { useCreateAgentControllerThreadMutation } from '../../../../hooks/useAgentControllerThreadMutations';
 import { usePreparingThreadId } from '../hooks/usePreparingThreadId';
-import { matchCommands } from '../services/commands';
+import { commandRequiresReadySession, matchCommands } from '../services/commands';
 import { AGENT_CONTROLLER_ID } from '../services/constants';
 import { ThreadPageKickoffTimeoutError, queueThreadPageKickoff } from '../services/threadPageReadiness';
 import { getModeColorClass } from './mode-colors';
@@ -66,10 +66,8 @@ let pendingImageSeq = 0;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 /** Aggregate cap across all pending images on a single message. */
 const MAX_TOTAL_IMAGE_BYTES = 20 * 1024 * 1024;
-// A first message typed while the session comes online waits for a sandbox
-// provision, repo clone and setup command — minutes, not the 60s a navigation
-// handoff needs.
-const PREPARING_SESSION_TIMEOUT_MS = 10 * 60 * 1000;
+// provision + clone + setup can take minutes
+export const PREPARING_SESSION_TIMEOUT_MS = 10 * 60 * 1000;
 
 function readFileAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -318,10 +316,13 @@ export function Composer({ variant = 'inline' }: ComposerProps) {
     // busy, which would route every later one into a steer the offline session
     // cannot take.
     if (preparingThreadId) {
-      // Only a message can wait for the session; commands act on it live.
       if (text.startsWith('/')) {
-        updateDraft(text);
-        pushNotice('Commands run once the session is ready.');
+        if (commandRequiresReadySession(text)) {
+          updateDraft(text);
+          pushNotice('Commands run once the session is ready.');
+          return;
+        }
+        await runComposerCommand(text);
         return;
       }
       if (images.length > 0) {
@@ -408,7 +409,7 @@ export function Composer({ variant = 'inline' }: ComposerProps) {
             onChange={e => updateDraft(e.target.value)}
             onKeyDown={onComposerKeyDown}
             onPaste={onPaste}
-            placeholder={busy ? 'Steer the agent…' : 'Ask Mastra Code…'}
+            placeholder={busy && !preparingThreadId ? 'Steer the agent…' : 'Ask Mastra Code…'}
             disabled={disabled}
             maxHeight={composerVariantMaxHeight[variant]}
             className={cn(composerVariantClass[variant], 'text-[15px]')}
@@ -437,7 +438,7 @@ export function Composer({ variant = 'inline' }: ComposerProps) {
               >
                 <ImagePlus size={14} />
               </Button>
-              {busy && (
+              {busy && !preparingThreadId && (
                 <Button
                   type="button"
                   variant="outline"

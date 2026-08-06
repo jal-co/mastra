@@ -5,7 +5,7 @@ import { createContext, useContext } from 'react';
 import { useParams } from 'react-router';
 
 import { useApiConfig } from '../../../../api/config';
-import { SkeletonRows } from '../../../ui';
+import { SkeletonRows } from '../../../ui/SkeletonRows';
 import { useAgentControllerThreadMessages } from '../../../../hooks/useAgentControllerThreadMessages';
 import { useFactoryQuery } from '../../../../hooks/useFactories';
 import { useEnsureMaterializedSandbox } from '../../../../hooks/useEnsureMaterializedSandbox';
