@@ -88,7 +88,7 @@ export function addCachedSession(
 ) {
   void queryClient.cancelQueries({ queryKey: queryKeys.sessions(projectRepositoryId) });
   queryClient.setQueryData<WorkspacesData>(queryKeys.sessions(projectRepositoryId), current => {
-    if (!current) return current;
+    if (!current) return splitSessions([session]);
     const all = [...current.workspaces, ...current.userSessions];
     return all.some(cached => cached.sessionId === session.sessionId) ? current : splitSessions([...all, session]);
   });

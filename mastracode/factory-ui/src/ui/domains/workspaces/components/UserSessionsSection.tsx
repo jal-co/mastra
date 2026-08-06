@@ -1,3 +1,4 @@
+import { MastraClientError } from '@mastra/client-js';
 import { Button } from '@mastra/playground-ui/components/Button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@mastra/playground-ui/components/Dialog';
 import { MainSidebar } from '@mastra/playground-ui/components/MainSidebar';
@@ -15,12 +16,11 @@ import { useFactoryQuery } from '../../../../hooks/useFactories';
 import { addCachedSession, removeCachedSession, useWorkspacesQuery } from '../../../../hooks/useWorkspaces';
 import { createAgentControllerClient, requireAgentControllerSession } from '../../chat/services/agentControllerClient';
 import { AGENT_CONTROLLER_ID } from '../../chat/services/constants';
-import { createUserSession, deleteUserSession } from '../services/github';
+import { createUserSession, deleteUserSession, getUserSession } from '../services/github';
 import type { FactoryUserSession } from '../services/github';
 import { getUserSessionLabel } from '../services/sessionPresentation';
 import { SessionNavRow } from './SessionNavRow';
 
-/** Personal sessions whose isolated repository workspace is prepared lazily by AgentController. */
 export function UserSessionsSection() {
   const { baseUrl } = useApiConfig();
   const { factoryId } = useParams<{ factoryId: string }>();
@@ -48,16 +48,13 @@ export function UserSessionsSection() {
     return requireAgentControllerSession(session);
   };
 
-  // Row only: bringing the controller session online provisions a sandbox and
-  // clones the repo — minutes the thread page already spends on mount.
+  // thread page owns sandbox provision + repo clone
   const createSession = useMutation({
     mutationFn: async () => {
       if (!repository) throw new Error('Link a repository to this factory first');
       return createUserSession(baseUrl, repository.projectRepositoryId);
     },
     onSuccess: session => {
-      // Seed what the thread page reads on mount — the response carries it, so
-      // the page renders the session instead of a spinner.
       queryClient.setQueryData<FactoryUserSession>(queryKeys.userSession(session.sessionId), session);
       addCachedSession(queryClient, repository?.projectRepositoryId, session);
       queryClient.setQueryData(
@@ -77,17 +74,25 @@ export function UserSessionsSection() {
 
   const deleteSession = useMutation({
     mutationFn: async (session: FactoryUserSession) => {
-      const chatSession = controllerSession(session.sessionId);
-      try {
-        await chatSession.deleteThread(session.sessionId);
-      } finally {
-        await deleteUserSession(baseUrl, session.sessionId);
+      const storedSession = await getUserSession(baseUrl, session.sessionId);
+      if (storedSession.materializedAt) {
+        const chatSession = controllerSession(session.sessionId);
+        try {
+          await chatSession.deleteThread(session.sessionId);
+        } catch (error) {
+          if (!(error instanceof MastraClientError) || error.status !== 404) throw error;
+        }
       }
+      await deleteUserSession(baseUrl, session.sessionId);
       return session;
     },
     onSuccess: session => {
       setConfirmDelete(null);
       removeCachedSession(queryClient, repository?.projectRepositoryId, session.sessionId);
+      queryClient.removeQueries({ queryKey: queryKeys.userSession(session.sessionId) });
+      queryClient.removeQueries({
+        queryKey: queryKeys.agentControllerThreadMessages(AGENT_CONTROLLER_ID, session.sessionId, session.sessionId),
+      });
       invalidate();
       toast('Session deleted');
       if (location.pathname === `/factories/${factoryId}/user/threads/${session.sessionId}`) {
@@ -104,8 +109,6 @@ export function UserSessionsSection() {
   const pending = createSession.isPending || deleteSession.isPending;
 
   const openSession = (session: FactoryUserSession) => {
-    // A user session's thread id is its own id, and the thread page binds the
-    // controller session to it on mount — nothing to await here.
     void navigate(`/factories/${factoryId}/user/threads/${session.sessionId}`);
   };
 
