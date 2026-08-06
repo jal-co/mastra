@@ -1,5 +1,11 @@
 # mastra
 
+## 1.23.1-alpha.1
+
+### Patch Changes
+
+- Fixed Git initialization during project creation. Git now uses the user's global Git configuration. ([#20791](https://github.com/mastra-ai/mastra/pull/20791))
+
 ## 1.23.1-alpha.0
 
 ### Patch Changes

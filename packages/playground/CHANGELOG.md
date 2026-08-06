@@ -1,5 +1,7 @@
 # @internal/playground
 
+## 1.23.1-alpha.1
+
 ## 1.23.1-alpha.0
 
 ### Patch Changes
